@@ -2,6 +2,8 @@
 
 This tool can help you to compare ElasticSearch indexes when you're doing some refactoring in mappings.
 
+## Install guide
+
 You need Erlang and Elixir to be installed on your machine.
 For OS X install commands look like these:
 
@@ -19,9 +21,12 @@ Usage:
 
 You must provide `--old-dump` and `--new-dump` parameters, `timeout` and `check-only` are optional.
 
-Of course you need to make these dumps somehow. I use `elasticdump` tool for that.
+## Dumps
+
+Of course you need to make these dumps somehow. I use `elasticdump` tool for that. You need Node.js for it.
 
 ```bash
+brew install node
 npm install -g elasticdump
 ```
 
@@ -32,3 +37,7 @@ elasticdump --input=http://<elasticsearch-url(localhost:9200)>/<index-name> --ou
 ```
 
 It is my personal tool and provided as is. If you have any issues - please let me know.
+
+## Known issues
+
+1. It can be working bad with datetimes if they are stored in different formats. Because it doesn't parse them and compare strings. It's done for performance purposes. Maybe will be changed in future.
