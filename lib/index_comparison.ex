@@ -4,7 +4,11 @@ defmodule IndexComparison do
   def main(args) do
     options = parse_args(args)
 
-    check_only = options[:check_only] |> String.split(",") || []
+    check_only = if options[:check_only] do
+      String.split(options[:check_only], ",")
+    else
+      []
+    end
     timeout = options[:timeout] || 30_000
 
     unless Enum.empty?(check_only) do
