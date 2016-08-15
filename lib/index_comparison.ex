@@ -9,7 +9,11 @@ defmodule IndexComparison do
     else
       []
     end
-    timeout = options[:timeout] || 30_000
+    timeout = if options[:timeout] do
+      String.to_integer(options[:timeout])
+    else
+      30_000
+    end
 
     unless Enum.empty?(check_only) do
       IO.puts "Checking only these fields: #{Enum.join(check_only, ", ")}"
