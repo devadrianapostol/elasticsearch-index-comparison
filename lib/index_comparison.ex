@@ -1,5 +1,6 @@
 defmodule IndexComparison do
   @necessary_arguments [:old_dump, :new_dump]
+  @id_field "_id"
 
   def main(args) do
     options = parse_args(args)
@@ -19,10 +20,10 @@ defmodule IndexComparison do
       IO.puts "Checking only these fields: #{Enum.join(check_only, ", ")}"
     end
 
-    old_index_pid = Task.async(fn -> index(options[:old_dump], check_only) end)
     new_index = index(options[:new_dump], check_only)
+    old_index = index(options[:old_dump], check_only)
 
-    compare(Task.await(old_index_pid, timeout), new_index, check_only)
+    compare(old_index, new_index, check_only)
   end
 
   defp parse_args(args) do
@@ -39,17 +40,17 @@ defmodule IndexComparison do
     file = file(file_name)
 
     IO.stream(file, :line)
-     |> Enum.reduce(%{}, fn el, acc ->
-      {:ok, json} = Poison.Parser.parse(el)
-      filtered_json = json |> Map.get("_source")
-      filtered_json = if Enum.empty?(check_only) do
-          filtered_json
-        else
-          filtered_json |> Map.take(check_only)
-        end
-      record_id = json |> Map.get("_id")
-      record_type = json |> Map.get("_type")
-      Map.put(acc, record_type <> "#" <> record_id, filtered_json)
+    |> Stream.map(fn document ->
+      json = Poison.Parser.parse!(document)
+
+      id = json[@id_field]
+      source = Map.put(json["_source"], @id_field, id)
+
+      if Enum.empty?(check_only) do
+        source
+      else
+        Map.take(source, Enum.uniq([@id_field | check_only]))
+      end
     end)
   end
 
@@ -68,43 +69,40 @@ defmodule IndexComparison do
   end
 
   defp compare(index1, index2, check_only) do
-    if index1 == index2 do
-      IO.puts "#{length(Map.keys(index1))} documents were checked for equality. All good!"
-      true
+    results =
+      Stream.zip(index1, index2)
+      |> Enum.map(fn {o, n} ->
+        if o != n do
+          if o[@id_field] != n[@id_field] do
+            IO.puts("Document #{o[@id_field]} is absent in new dump or ordering is different")
+            System.halt(1)
+          else
+            show_diff(o, n)
+          end
+        end
+      end)
+
+    errors = results |> List.flatten |> Enum.filter(&!is_nil(&1))
+
+    if Enum.empty?(errors) do
+      IO.puts "#{length(results)} documents were checked for equality. All good!"
     else
-      if Map.keys(index1) |> Enum.sort != Map.keys(index2) |> Enum.sort && Enum.empty?(check_only)  do
-        IO.puts "keys are not equal"
-        show_not_equal_keys(index1, index2)
-      else
-        IO.puts "keys are equal, but documents are not"
-        Map.keys(index1) |> Enum.each(fn el ->
-          show_diff(Map.get(index1, el), Map.get(index2, el), el)
-        end)
-      end
-      false
+      Enum.each(errors, &IO.puts/1)
     end
   end
 
-  defp show_not_equal_keys(origin, changed) do
-    differences = changed |> Enum.filter(fn el -> !Enum.member?(origin, el) end)
-    IO.inspect length(differences)
-    IO.inspect Enum.at(origin, 0)
-    IO.inspect differences
-  end
-
-  defp show_diff(source1, source2, id) do
+  defp show_diff(source1, source2) do
+    id = Map.get(source1, @id_field)
     keys = Map.keys(source1)
-    Enum.each(keys, fn key ->
+    Enum.map(keys, fn key ->
       el1 = Map.get(source1, key)
       el2 = Map.get(source2, key)
       if el1 != el2 do
         if is_list(el1) && Enum.sort(el1) == Enum.sort(el2) do
-          IO.puts "'#{key}' is equal only when sorted!\n"
+          "'#{key}' is equal only when sorted!"
         else
-          IO.puts "--------------\n'#{key}' key is not equal for document: #{id}\n------OLD------"
-          IO.inspect el1
-          IO.puts "------NEW------"
-          IO.inspect el2
+          "--------------\n'#{key}' key is not equal for document: #{id}\n------OLD------" <>
+          "#{inspect(el1)}\n------NEW------\n#{inspect(el2)}"
         end
       end
     end)
