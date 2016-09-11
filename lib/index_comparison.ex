@@ -19,8 +19,8 @@ defmodule IndexComparison do
       IO.puts "Checking only these fields: #{Enum.join(check_only, ", ")}"
     end
 
-    old_index_pid = index(options[:old_dump], check_only)
-    new_index = Task.await(index(options[:new_dump], check_only), timeout)
+    old_index_pid = Task.async(fn -> index(options[:old_dump], check_only) end)
+    new_index = index(options[:new_dump], check_only)
 
     compare(Task.await(old_index_pid, timeout), new_index, check_only)
   end
@@ -38,20 +38,18 @@ defmodule IndexComparison do
   defp index(file_name, check_only) do
     file = file(file_name)
 
-    Task.async(fn ->
-      IO.stream(file, :line)
-       |> Enum.reduce(%{}, fn el, acc ->
-        {:ok, json} = Poison.Parser.parse(el)
-        filtered_json = json |> Map.get("_source")
-        filtered_json = if Enum.empty?(check_only) do
-            filtered_json
-          else
-            filtered_json |> Map.take(check_only)
-          end
-        record_id = json |> Map.get("_id")
-        record_type = json |> Map.get("_type")
-        Map.put(acc, record_type <> "#" <> record_id, filtered_json)
-      end)
+    IO.stream(file, :line)
+     |> Enum.reduce(%{}, fn el, acc ->
+      {:ok, json} = Poison.Parser.parse(el)
+      filtered_json = json |> Map.get("_source")
+      filtered_json = if Enum.empty?(check_only) do
+          filtered_json
+        else
+          filtered_json |> Map.take(check_only)
+        end
+      record_id = json |> Map.get("_id")
+      record_type = json |> Map.get("_type")
+      Map.put(acc, record_type <> "#" <> record_id, filtered_json)
     end)
   end
 
