@@ -37,9 +37,9 @@ defmodule IndexComparison do
   end
 
   defp index(file_name, check_only) do
-    file = file(file_name)
-
-    IO.stream(file, :line)
+    file_name
+    |> file
+    |> IO.stream(:line)
     |> Stream.map(fn document ->
       json = Poison.Parser.parse!(document)
 
@@ -52,6 +52,7 @@ defmodule IndexComparison do
         Map.take(source, Enum.uniq([@id_field | check_only]))
       end
     end)
+    |> Enum.sort_by(fn x -> x[@id_field] end)
   end
 
   defp file(file_name) when is_nil(file_name) do
