@@ -37,14 +37,17 @@ defmodule IndexComparison do
   end
 
   defp index(file_name, check_only) do
-    file = file(file_name)
-
-    IO.stream(file, :line)
+    file_name
+    |> file
+    |> IO.stream(:line)
     |> Stream.map(fn document ->
       json = Poison.Parser.parse!(document)
 
       id = json[@id_field]
-      source = Map.put(json["_source"], @id_field, id)
+      source =
+        json["_source"]
+        |> Map.put(@id_field, id)
+        |> Map.put("type", json["_type"])
 
       if Enum.empty?(check_only) do
         source
@@ -52,6 +55,7 @@ defmodule IndexComparison do
         Map.take(source, Enum.uniq([@id_field | check_only]))
       end
     end)
+    |> Enum.sort_by(fn x -> "#{x["type"]}#{x[@id_field]}" end)
   end
 
   defp file(file_name) when is_nil(file_name) do
@@ -92,7 +96,6 @@ defmodule IndexComparison do
   end
 
   defp show_diff(source1, source2) do
-    id = Map.get(source1, @id_field)
     keys = Map.keys(source1)
     Enum.map(keys, fn key ->
       el1 = Map.get(source1, key)
@@ -101,8 +104,10 @@ defmodule IndexComparison do
         if is_list(el1) && Enum.sort(el1) == Enum.sort(el2) do
           "'#{key}' is equal only when sorted!"
         else
-          "--------------\n'#{key}' key is not equal for document: #{id}\n------OLD------" <>
-          "#{inspect(el1)}\n------NEW------\n#{inspect(el2)}"
+          id = source1[@id_field]
+          type = source1["type"]
+          "--------------\n'#{key}' key is not equal for document: #{type}##{id}\n------OLD------" <>
+          "#{inspect(el1)}\n------NEW------\n#{inspect(el2)}\n"
         end
       end
     end)
