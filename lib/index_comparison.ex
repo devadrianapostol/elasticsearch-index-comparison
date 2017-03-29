@@ -1,6 +1,7 @@
 defmodule IndexComparison do
   @necessary_arguments [:old_dump, :new_dump]
   @id_field "_id"
+  @type_field "_type"
 
   def main(args) do
     options = parse_args(args)
@@ -10,11 +11,11 @@ defmodule IndexComparison do
     else
       []
     end
-    timeout = if options[:timeout] do
-      String.to_integer(options[:timeout])
-    else
-      30_000
-    end
+    # timeout = if options[:timeout] do
+    #   String.to_integer(options[:timeout])
+    # else
+    #   30_000
+    # end
 
     unless Enum.empty?(check_only) do
       IO.puts "Checking only these fields: #{Enum.join(check_only, ", ")}"
@@ -44,7 +45,8 @@ defmodule IndexComparison do
       json = Poison.Parser.parse!(document)
 
       id = json[@id_field]
-      source = Map.put(json["_source"], @id_field, id)
+      type = json[@type_field]
+      source = Map.put(json["_source"], @id_field, "#{type}_#{id}")
 
       if Enum.empty?(check_only) do
         source
@@ -68,30 +70,41 @@ defmodule IndexComparison do
     end
   end
 
-  defp compare(index1, index2, check_only) do
-    results =
-      Stream.zip(index1, index2)
-      |> Enum.map(fn {o, n} ->
-        if o != n do
-          if o[@id_field] != n[@id_field] do
-            IO.puts("Document #{o[@id_field]} is absent in new dump or ordering is different")
-            System.halt(1)
-          else
-            show_diff(o, n)
-          end
-        end
-      end)
+  defp compare(old_index, new_index, check_only) do
+    new_index_map = Stream.map(new_index, fn(obj) ->
+      {obj[@id_field], obj}
+    end) |> Map.new
 
-    errors = results |> List.flatten |> Enum.filter(&!is_nil(&1))
+    result = Stream.map(old_index, fn(old) ->
+      new = new_index_map[old[@id_field]]
+      message = cond do
+        !new ->
+          "Document #{old[@id_field]} is absent in new dump"
+        old != new ->
+          entry_diff(old, new)
+        true ->
+          nil
+      end
+      {old[@id_field], message}
+    end) |> Map.new
+
+    old_ids = Map.keys(result)
+    new_excess = Map.drop(new_index_map, old_ids)
+
+    if Enum.count(new_excess) > 0 do
+      IO.puts("New idex contains #{Enum.count(new_excess)} excess entries: #{Map.keys(new_excess) |> Enum.join(", ")}")
+    end
+
+    errors = Map.values(result) |> List.flatten  |> Enum.reject(&is_nil/1)
 
     if Enum.empty?(errors) do
-      IO.puts "#{length(results)} documents were checked for equality. All good!"
+      IO.puts("#{Enum.count(new_index_map)} documents were checked for equality. All good!")
     else
       Enum.each(errors, &IO.puts/1)
     end
   end
 
-  defp show_diff(source1, source2) do
+  defp entry_diff(source1, source2) do
     id = Map.get(source1, @id_field)
     keys = Map.keys(source1)
     Enum.map(keys, fn key ->
