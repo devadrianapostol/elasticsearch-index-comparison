@@ -8,7 +8,12 @@ defmodule IndexComparison.Mixfile do
      build_embedded: Mix.env == :prod,
      start_permanent: Mix.env == :prod,
      escript: [main_module: IndexComparison],
-     deps: deps()]
+     deps: deps(),
+     dialyzer: [
+      plt_add_deps: :transitive,
+      flags: ~w{error_handling race_conditions underspecs unknown
+                unmatched_returns}
+    ]]
   end
 
   # Configuration for the OTP application
