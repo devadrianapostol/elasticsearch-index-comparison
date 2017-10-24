@@ -10,7 +10,7 @@ defmodule ArgsParser do
     * `formatter` - the type of formatter of the results. at the moment only `cli` is avaliable
     * `only_fields` - comma separated field names that will be checked. by default the script checks all fields
     * `except_fields` - comma separated field names that won't be checked. cannot be used with `only_fields`
-
+    
   """
 
   @spec parse(list(String.t)) :: {:ok, Options.t} | {:error, String.t}
@@ -35,6 +35,25 @@ defmodule ArgsParser do
   @spec required_options_present?(Keyword.t) :: boolean
   defp required_options_present?(options) do
     Enum.all?(@necessary_arguments, & Keyword.has_key?(options, &1))
+  end
+
+  @spec assign_formatter(Options.t, Keyword.t) :: Options.t
+  def assign_formatter(options, raw_options) do
+    if Keyword.has_key?(raw_options, :formatter) do
+      %{options | formatter: parse_formatter(raw_options[:formatter])}
+    else
+      options
+    end
+  end
+
+  @spec parse_formatter(String.t) :: Formatter.t | no_return
+  def parse_formatter(formatter) do
+    case formatter do
+      "cli" -> Formatter.CLI
+      _ ->
+        IO.puts "Unknown formatter type " <> formatter
+        System.halt(1)
+    end
   end
 
   @spec assign_fields(Options.t, Keyword.t) :: Options.t

@@ -3,20 +3,29 @@ defmodule IndexComparison do
   @type_field_name "_type"
   @source_field_name "_source"
 
-  alias Inconsistency.{DifferentValues,DifferentKeys,MissingDocument}
+  @moduledoc """
+  The main module that is the entrypoint for the CLI app.
+  It parses options, parses 2 files, compares them, produces a report
+  and format it somehow based on the `formatter` parameter
+  """
+
+  alias Inconsistency.{DifferentValues, DifferentKeys, MissingDocument}
   alias Poison.Parser
 
-  @spec main(list(String.t)) :: any
+  @spec main(list(String.t)) :: no_return
   def main(args) do
     case ArgsParser.parse(args) do
       {:error, message} ->
         IO.puts(message)
       {:ok, options} ->
-        IO.puts(Options.inspect_fields(options))
+        options |> Options.inspect_fields |> IO.puts
 
         old_index = load_dump(options.old_dump_path, options)
         new_index = load_dump(options.new_dump_path, options)
-        compare(old_index, new_index, options)
+
+        old_index
+        |> compare(new_index, options)
+        |> options.formatter.format
     end
   end
 
@@ -25,7 +34,7 @@ defmodule IndexComparison do
     path
     |> File.open!
     |> IO.stream(:line)
-    |> Stream.map(& parse_dump_entry(&1, options))
+    |> Stream.map(&parse_dump_entry(&1, options))
     |> Enum.into(%{})
   end
 
@@ -98,8 +107,8 @@ defmodule IndexComparison do
 
   @spec check_keys(String.t, map, map) :: :ok | Inconsistency.t
   def check_keys(id, document, another_document) do
-    keys = Map.keys(document)
-    another_keys = Map.keys(another_document)
+    keys = document |> Map.keys |> Enum.sort
+    another_keys = another_document |> Map.keys |> Enum.sort
 
     if keys == another_keys do
       :ok

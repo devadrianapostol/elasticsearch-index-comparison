@@ -2,7 +2,7 @@ defmodule IndexComparisonTest do
   use ExUnit.Case
   doctest IndexComparison
 
-  alias Inconsistencies.{DifferentValues,DifferentKeys,MissingDocument}
+  alias Inconsistency.{DifferentValues, DifferentKeys, MissingDocument}
 
   test "parse_dump_entry all fields" do
     dump = ~s({"_id": "123123", "_type": "some_type", "_source": {"a": 1, "b": 2}})
