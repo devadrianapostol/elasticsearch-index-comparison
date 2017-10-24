@@ -1,114 +1,123 @@
 defmodule IndexComparison do
-  @necessary_arguments [:old_dump, :new_dump]
-  @id_field "_id"
+  @id_field_name "_id"
+  @type_field_name "_type"
+  @source_field_name "_source"
 
+  alias Inconsistency.{DifferentValues,DifferentKeys,MissingDocument}
+  alias Poison.Parser
+
+  @spec main(list(String.t)) :: any
   def main(args) do
-    options = parse_args(args)
+    case ArgsParser.parse(args) do
+      {:error, message} ->
+        IO.puts(message)
+      {:ok, options} ->
+        IO.puts(Options.inspect_fields(options))
 
-    check_only = if options[:check_only] do
-      String.split(options[:check_only], ",")
-    else
-      []
-    end
-    timeout = if options[:timeout] do
-      String.to_integer(options[:timeout])
-    else
-      30_000
-    end
-
-    unless Enum.empty?(check_only) do
-      IO.puts "Checking only these fields: #{Enum.join(check_only, ", ")}"
-    end
-
-    new_index = index(options[:new_dump], check_only)
-    old_index = index(options[:old_dump], check_only)
-
-    compare(old_index, new_index, check_only)
-  end
-
-  defp parse_args(args) do
-    {options, _, _} = OptionParser.parse(args)
-    if Enum.all?(@necessary_arguments, fn arg -> arg in Keyword.keys(options) end) do
-      options
-    else
-      IO.puts "You must provide --old-dump and --new-dump parameters"
-      System.halt(1)
+        old_index = load_dump(options.old_dump_path, options)
+        new_index = load_dump(options.new_dump_path, options)
+        compare(old_index, new_index, options)
     end
   end
 
-  defp index(file_name, check_only) do
-    file_name
-    |> file
+  @spec load_dump(String.t, Options.t) :: map
+  def load_dump(path, options) do
+    path
+    |> File.open!
     |> IO.stream(:line)
-    |> Stream.map(fn document ->
-      json = Poison.Parser.parse!(document)
+    |> Stream.map(& parse_dump_entry(&1, options))
+    |> Enum.into(%{})
+  end
 
-      id = json[@id_field]
-      source =
-        json["_source"]
-        |> Map.put(@id_field, id)
-        |> Map.put("type", json["_type"])
+  @spec parse_dump_entry(String.t, Options.t) :: {String.t, map}
+  def parse_dump_entry(entry, options) do
+    json = Parser.parse!(entry)
+    # TODO: make it a CLI parameter
+    id = json[@id_field_name]
+    type_name = json[@type_field_name]
+    unique_id = type_name <> "#" <> id
 
-      if Enum.empty?(check_only) do
-        source
-      else
-        Map.take(source, Enum.uniq([@id_field | check_only]))
+    {
+      unique_id,
+      json
+      |> Map.fetch!(@source_field_name)
+      |> filter_fields(options)
+    }
+  end
+
+  @spec filter_fields(map, Options.t) :: map
+  def filter_fields(document, options) do
+    case options.type_of_checking do
+      :all -> document
+      # TODO: make it work for nested objects
+      :only -> Map.take(document, [:id | options.field_names])
+      :except -> Map.drop(document, options.field_names)
+    end
+  end
+
+  @spec compare(map, map, Options.t) :: list(Inconsistency.t)
+  def compare(old_index, new_index, options) do
+    {old, new, missing_inconsistencies} = filter_missing_documents(old_index, new_index)
+    document_inconsistencies = check_documents(old, new, options)
+    missing_inconsistencies ++ document_inconsistencies
+  end
+
+  @spec filter_missing_documents(map, map) :: {map, map, list(Inconsistency.t)}
+  def filter_missing_documents(index, another_index) do
+    {filtered_index, inconsistencies} = filter_missing_documents(index, another_index, [], :new)
+
+    {another_filtered_index, all_inconsistencies} =
+      filter_missing_documents(another_index, filtered_index, inconsistencies, :old)
+
+    {filtered_index, another_filtered_index, all_inconsistencies}
+  end
+
+  @spec filter_missing_documents(map, map, list(Inconsistency.t), MissingDocument.where) :: {map, list(Inconsistency.t)}
+  def filter_missing_documents(index, another_index, inconsistencies, where) do
+    ids = index |> Map.keys |> MapSet.new
+    another_ids = another_index |> Map.keys |> MapSet.new
+    diff = MapSet.difference(ids, another_ids)
+    new_index = Map.drop(index, diff)
+    new_inconsistencies = Enum.map(diff, fn id -> %MissingDocument{id: id, where: where} end)
+    {new_index, new_inconsistencies ++ inconsistencies}
+  end
+
+  @spec check_documents(map, map, Options.t) :: list(Inconsistency.t)
+  def check_documents(dump, another_dump, _options) do
+    Enum.reduce(dump, [], fn ({id, document}, inconsistencies) ->
+      another_document = another_dump[id]
+
+      # If the keys are different we skip checking the values
+      # TODO: add CLI flag to use stricter behaviour
+      case check_keys(id, document, another_document) do
+        :ok -> check_document_values(id, document, another_document) ++ inconsistencies
+        key_inconsistency -> [key_inconsistency | inconsistencies]
       end
     end)
-    |> Enum.sort_by(fn x -> "#{x["type"]}#{x[@id_field]}" end)
   end
 
-  defp file(file_name) when is_nil(file_name) do
-    IO.puts("Wrong filename! #{file_name}")
-    System.halt(1)
-  end
+  @spec check_keys(String.t, map, map) :: :ok | Inconsistency.t
+  def check_keys(id, document, another_document) do
+    keys = Map.keys(document)
+    another_keys = Map.keys(another_document)
 
-  defp file(file_name) do
-    case File.open(file_name, [:read]) do
-      {:ok, file} -> file
-      _ ->
-        IO.puts("Cannot open file #{file_name}")
-        System.halt(1)
-    end
-  end
-
-  defp compare(index1, index2, check_only) do
-    results =
-      Stream.zip(index1, index2)
-      |> Enum.map(fn {o, n} ->
-        if o != n do
-          if o[@id_field] != n[@id_field] do
-            IO.puts("Document #{o[@id_field]} is absent in new dump or ordering is different")
-            System.halt(1)
-          else
-            show_diff(o, n)
-          end
-        end
-      end)
-
-    errors = results |> List.flatten |> Enum.filter(&!is_nil(&1))
-
-    if Enum.empty?(errors) do
-      IO.puts "#{length(results)} documents were checked for equality. All good!"
+    if keys == another_keys do
+      :ok
     else
-      Enum.each(errors, &IO.puts/1)
+      %DifferentKeys{id: id, keys: keys, another_keys: another_keys}
     end
   end
 
-  defp show_diff(source1, source2) do
-    keys = Map.keys(source1)
-    Enum.map(keys, fn key ->
-      el1 = Map.get(source1, key)
-      el2 = Map.get(source2, key)
-      if el1 != el2 do
-        if is_list(el1) && Enum.sort(el1) == Enum.sort(el2) do
-          "'#{key}' is equal only when sorted!"
-        else
-          id = source1[@id_field]
-          type = source1["type"]
-          "--------------\n'#{key}' key is not equal for document: #{type}##{id}\n------OLD------" <>
-          "#{inspect(el1)}\n------NEW------\n#{inspect(el2)}\n"
-        end
+  @spec check_document_values(String.t, map, map) :: [Inconsistency.t]
+  def check_document_values(id, document, another_document) do
+    Enum.reduce(document, [], fn ({key, value}, inconsistencies) ->
+      another_value = another_document[key]
+
+      # TODO: add check for lists. if their sort is only different then it should be another inconsistency type
+      if another_value != value do
+        [%DifferentValues{id: id, key: key, value: value, another_value: another_value} | inconsistencies]
+      else
+        inconsistencies
       end
     end)
   end

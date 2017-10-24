@@ -1,5 +1,5 @@
 defmodule ArgsParserTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
 
   test "valid options" do
     result = ArgsParser.parse(["--old-dump", "some_path", "--new-dump", "another-path"])
