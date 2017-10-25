@@ -9,7 +9,7 @@ defmodule IndexComparison do
   and format it somehow based on the `formatter` parameter
   """
 
-  alias Inconsistency.{DifferentValues, DifferentKeys, MissingDocument}
+  alias Inconsistency.{DifferentValues, DifferentKeys, DifferentOrder, MissingDocument}
   alias Poison.Parser
 
   @spec main(list(String.t)) :: no_return
@@ -122,11 +122,12 @@ defmodule IndexComparison do
     Enum.reduce(document, [], fn ({key, value}, inconsistencies) ->
       another_value = another_document[key]
 
-      # TODO: add check for lists. if their sort is only different then it should be another inconsistency type
-      if another_value != value do
-        [%DifferentValues{id: id, key: key, value: value, another_value: another_value} | inconsistencies]
-      else
-        inconsistencies
+      cond do
+        value != another_value && is_list(value) && is_list(another_value) ->
+          [%DifferentOrder{id: id, key: key, values: value, another_values: another_value} | inconsistencies]
+        value != another_value ->
+          [%DifferentValues{id: id, key: key, value: value, another_value: another_value} | inconsistencies]
+        true -> inconsistencies
       end
     end)
   end

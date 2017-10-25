@@ -2,6 +2,7 @@ defmodule Inconsistency do
   @type t :: Inconsistency.DifferentValues.t
              | Inconsistency.DifferentKeys.t
              | Inconsistency.MissingDocument.t
+             | Inconsistency.DifferentOrder.t
 
   @moduledoc """
   This module defines all types of possible issues
@@ -37,6 +38,17 @@ defmodule Inconsistency do
     @moduledoc """
     This struct is needed for the case when
     some document is missing in either of index dumps
+    """
+  end
+
+  defmodule DifferentOrder do
+    defstruct [:id, :key, :values, :another_values]
+    @type t :: %__MODULE__{id: String.t, key: String.t,
+                           values: list(any), another_values: list(any)}
+
+    @moduledoc """
+    This struct is used when under the same key we have
+    the same lists of elements but with different order in the dumps
     """
   end
 end

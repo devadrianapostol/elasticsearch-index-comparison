@@ -1,5 +1,5 @@
 defmodule Formatter.CLI do
-  alias Inconsistency.{DifferentValues, DifferentKeys, MissingDocument}
+  alias Inconsistency.{DifferentValues, DifferentKeys, MissingDocument, DifferentOrder}
 
   @moduledoc """
   This formatter simply writes the report to STDOUT.
@@ -19,11 +19,15 @@ defmodule Formatter.CLI do
     case inconsistency do
       %DifferentValues{id: id, key: key, value: value, another_value: another_value} ->
         "Document #{id} is inconsistent between indices on field: #{key}\n" <>
-          "In old: #{inspect value}" <> "\nIn new: #{inspect another_value}\n"
+          "In old: #{inspect value}\n" <> "In new: #{inspect another_value}\n"
 
       %DifferentKeys{id: id, keys: keys, another_keys: another_keys} ->
         "Keys for document #{id} are inconsistent between indices\n" <>
-          "In old: #{inspect keys}" <> "\nIn new: #{inspect another_keys}\n"
+          "In old: #{inspect keys}\n" <> "In new: #{inspect another_keys}\n"
+
+      %DifferentOrder{id: id, key: key, values: values, another_values: another_values} ->
+        "Values in document #{id} under key #{key} are the same but have different order\n" <>
+          "In old: #{inspect values}\n" <> "In new: #{inspect another_values}\n"
 
       %MissingDocument{id: id, where: where} ->
         "Document #{id} is missing in #{where} index"

@@ -2,7 +2,7 @@ defmodule IndexComparisonTest do
   use ExUnit.Case
   doctest IndexComparison
 
-  alias Inconsistency.{DifferentValues, DifferentKeys, MissingDocument}
+  alias Inconsistency.{DifferentValues, DifferentKeys, MissingDocument, DifferentOrder}
 
   test "parse_dump_entry all fields" do
     dump = ~s({"_id": "123123", "_type": "some_type", "_source": {"a": 1, "b": 2}})
@@ -73,5 +73,12 @@ defmodule IndexComparisonTest do
     new = %{"some_type1#2" => %{"a" => 1, "b" => 2}}
     assert IndexComparison.compare(old, new, %Options{}) ==
       [%DifferentValues{id: "some_type1#2", key: "b", value: 3, another_value: 2}]
+  end
+
+  test "compare when order of values are different" do
+    old = %{"some_type1#2" => %{"a" => [1, 2]}}
+    new = %{"some_type1#2" => %{"a" => [2, 1]}}
+    assert IndexComparison.compare(old, new, %Options{}) ==
+      [%DifferentOrder{id: "some_type1#2", key: "a", values: [1, 2], another_values: [2, 1]}]
   end
 end
