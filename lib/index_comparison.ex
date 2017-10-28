@@ -34,7 +34,11 @@ defmodule IndexComparison do
     path
     |> File.open!
     |> IO.stream(:line)
-    |> Stream.map(&parse_dump_entry(&1, options))
+    |> Stream.chunk_every(20_000) # TODO: make it a CLI parameter
+    |> Enum.map(fn chunk ->
+      Task.async(fn -> Enum.map(chunk, &parse_dump_entry(&1, options)) end)
+    end)
+    |> Enum.flat_map(&Task.await(&1, 30_000))
     |> Enum.into(%{})
   end
 
@@ -93,8 +97,21 @@ defmodule IndexComparison do
 
   @spec check_documents(map, map, Options.t) :: list(Inconsistency.t)
   def check_documents(dump, another_dump, _options) do
-    Enum.reduce(dump, [], fn ({id, document}, inconsistencies) ->
-      another_document = another_dump[id]
+    dump
+    |> Enum.chunk_every(10_000) # TODO: make it a CLI parameter
+    |> Enum.map(fn chunk ->
+      another_chunk = Map.take(another_dump, Enum.map(chunk, &elem(&1, 0)))
+      Task.async(fn ->
+        check_chunks_of_documents(chunk, another_chunk)
+      end)
+    end)
+    |> Enum.flat_map(&Task.await/1)
+  end
+
+  @spec check_chunks_of_documents(list(tuple) | map, map) :: list(Inconsistency.t)
+  def check_chunks_of_documents(chunk, another_chunk) do
+    Enum.reduce(chunk, [], fn ({id, document}, inconsistencies) ->
+      another_document = another_chunk[id]
 
       # If the keys are different we skip checking the values
       # TODO: add CLI flag to use stricter behaviour
